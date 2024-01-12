@@ -64,7 +64,7 @@ def sign_in():
                 payload = {
                     "id": result[0],
                     "email": result[1],
-                    "exp": datetime.datetime.utcnow() + datetime.timedelta(seconds=60 * 60 * 12) #expired after 12 hours
+                    "exp": datetime.datetime.utcnow() + datetime.timedelta(seconds=60) #expired after 12 hours
                 }
                 token = jwt.encode(payload, os.getenv("JWT_SECRET_KEY"), algorithm="HS512")
                 return {"isSuccess": True, "message": "Signed in successfully!", "token": token}, 200
@@ -79,13 +79,21 @@ def sign_in():
         #print(traceback.format_exc())
         return {"isSuccess": False, "message": "Bad Request"}, 400
 
-""" @app.route("/decode_test", methods = ['POST'])
-def decode_test():
+@app.route("/get_username_by_token")
+def get_username_by_token():
     try:
-        obj = jwt.decode(request.get_json()["decode_str"], os.getenv("JWT_SECRET_KEY"), algorithms=["HS512"])
-        return obj
+        headers = request.headers
+        token = headers["Authorization"].split("Bearer ", 1)[1]
+        decoded_object = jwt.decode(token, os.getenv("JWT_SECRET_KEY"), algorithms=["HS512"])
+        cur.execute(f"SELECT username FROM users.users WHERE id = {decoded_object['id']}")
+        username, = cur.fetchone()
+        return {"isSuccess": True, "username": username}
     except jwt.exceptions.ExpiredSignatureError:
-        return "JWT signature expired!" """
+        #print(traceback.format_exc())
+        return {"isSuccess": False, "message": "JWT signature expired!"}, 400
+    except Exception:
+        #print(traceback.format_exc())
+        return {"isSuccess": False, "message": "Bad Request"}, 400
 
 if __name__ == '__main__':
-    app.run(debug = True, port = 5000)
+    app.run(debug = True, host=os.getenv("FLASK_HOST_URL"), port = 5000)
