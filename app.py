@@ -6,7 +6,7 @@ from flask import Flask, request
 from flask_cors import CORS
 from argon2 import PasswordHasher, exceptions
 import jwt
-from helpers.validations import validate_email_syntax, validate_unique_username_and_email
+from helpers.validations import *
 import traceback
 
 app = Flask(__name__)
@@ -28,8 +28,8 @@ def sign_up():
         email = request_body["email"].strip()
         password = request_body["password"].strip()
         if username and email and password:
-            #Check for valid email syntax
-            if validate_email_syntax(email):
+            #Check for valid email syntax and password
+            if validate_email_syntax(email) and validate_password(password):
                 #Finally, check for unique username and email in database
                 isUnique, message = validate_unique_username_and_email(conn, cur, username, email)
                 if not isUnique:
@@ -198,10 +198,10 @@ def change_user_information():
                     #print(traceback.format_exc())
                     conn.rollback()
                     raise Exception("Error in database")
-                conn.close()
-                return {"isSuccess": True, "message": "Password changed successfully"}
             else:
-                raise Exception("time_after_last_sign_in_time is smaller than 30 days")
+                print("Username cannot be changed within 30 days since last change. Other user information updated successfully")
+            conn.close()
+            return {"isSuccess": True, "message": "User information updated successfully"}
         else:
             raise Exception
     except jwt.exceptions.ExpiredSignatureError:
@@ -224,11 +224,11 @@ def change_password():
         #Decode the token to get user id
         token = headers["Authorization"].split("Bearer ", 1)[1]
         decoded_object = jwt.decode(token, os.getenv("JWT_SECRET_KEY"), algorithms=["HS512"])
-        #Check if fields are null or empty
+        #Check if fields are null or empty and new password is valid
         current_password = request_body["current_password"].strip()
         new_password = request_body["new_password"].strip()
-        if current_password and new_password:
-            #Check if user password exists
+        if current_password and new_password and validate_password(new_password):
+            #Check if user current password exists
             try:
                 cur.execute(f"SELECT password FROM users.users WHERE id = {decoded_object['id']}")
                 result = cur.fetchone()
