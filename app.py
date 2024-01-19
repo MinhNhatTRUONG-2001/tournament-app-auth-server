@@ -2,15 +2,25 @@ from datetime import datetime, timezone, timedelta
 import os
 import psycopg2
 from db_connection import dbname, dbuser, dbpassword, dbhost, dbport
-from flask import Flask, request
+from flask import Flask, render_template, request, url_for
 from flask_cors import CORS
 from argon2 import PasswordHasher, exceptions
 import jwt
+from flask_mail import Mail
 from helpers.validations import *
 import traceback
 
 app = Flask(__name__)
+app.config['MAIL_SERVER']='smtp.gmail.com'
+app.config['MAIL_PORT'] = 465
+app.config['MAIL_USERNAME'] = os.getenv("MAIL_USERNAME")
+app.config['MAIL_PASSWORD'] = os.getenv("MAIL_PASSWORD")
+app.config['MAIL_USE_TLS'] = False
+app.config['MAIL_USE_SSL'] = True
+mail = Mail(app)
 CORS(app)
+
+from helpers.send_email import send_email
 
 @app.route("/")
 def it_works():
@@ -43,7 +53,7 @@ def sign_up():
             last_sign_in_time = datetime.now(timezone.utc)
             last_username_change_time = datetime.now(timezone.utc)
             try:
-                cur.execute(f"""INSERT INTO users.users(username, email, password, last_sign_in_time, last_username_change_time)
+                cur.execute(f"""INSERT INTO auth.users(username, email, password, last_sign_in_time, last_username_change_time)
                     VALUES ('{username}', '{email}', '{hashed_password}', '{last_sign_in_time}', '{last_username_change_time}')
                     RETURNING id""")
                 new_id = cur.fetchone()[0]
@@ -80,7 +90,7 @@ def sign_in():
         if username_or_email and password:
             #Check if username and password exist in the same row in the database
             try:
-                cur.execute(f"""SELECT id, email, password FROM users.users
+                cur.execute(f"""SELECT id, email, password FROM auth.users
                     WHERE username = '{username_or_email}' OR email = '{username_or_email}'""")
                 result = cur.fetchone()
                 conn.commit()
@@ -101,7 +111,7 @@ def sign_in():
                 }
                 token = jwt.encode(payload, os.getenv("JWT_SECRET_KEY"), algorithm="HS512")
                 try:
-                    cur.execute(f"""UPDATE users.users
+                    cur.execute(f"""UPDATE auth.users
                                 SET last_sign_in_time = '{datetime.now(timezone.utc)}'
                                 WHERE id = {result[0]}""")
                     conn.commit()
@@ -135,7 +145,7 @@ def get_user_information():
         token = headers["Authorization"].split("Bearer ", 1)[1]
         decoded_object = jwt.decode(token, os.getenv("JWT_SECRET_KEY"), algorithms=["HS512"])
         try:
-            cur.execute(f"SELECT username, email, last_username_change_time FROM users.users WHERE id = {decoded_object['id']}")
+            cur.execute(f"SELECT username, email, last_username_change_time FROM auth.users WHERE id = {decoded_object['id']}")
             result = cur.fetchone()
             conn.commit()
         except Exception:
@@ -179,7 +189,7 @@ def change_user_information():
         new_username = request_body["username"].strip()
         if new_username:
             try:
-                cur.execute(f"SELECT last_username_change_time FROM users.users WHERE id = {decoded_object['id']}")
+                cur.execute(f"SELECT last_username_change_time FROM auth.users WHERE id = {decoded_object['id']}")
                 result = cur.fetchone()
                 conn.commit()
             except Exception:
@@ -190,7 +200,7 @@ def change_user_information():
             #If the last_username_change_time is larger than 30 days, the username can be changed
             if time_after_last_sign_in_time >= timedelta(days=30):
                 try:
-                    cur.execute(f"""UPDATE users.users
+                    cur.execute(f"""UPDATE auth.users
                                 SET username = '{new_username}', last_username_change_time = '{datetime.now(timezone.utc)}'
                                 WHERE id = {decoded_object['id']}""")
                     conn.commit()
@@ -230,7 +240,7 @@ def change_password():
         if current_password and new_password and validate_password(new_password):
             #Check if user current password exists
             try:
-                cur.execute(f"SELECT password FROM users.users WHERE id = {decoded_object['id']}")
+                cur.execute(f"SELECT password FROM auth.users WHERE id = {decoded_object['id']}")
                 result = cur.fetchone()
                 if result:
                     hashed_password = result[0]
@@ -250,7 +260,7 @@ def change_password():
                 ph.verify(hashed_password, current_password)
                 new_hashed_password = ph.hash(new_password)
                 try:
-                    cur.execute(f"""UPDATE users.users
+                    cur.execute(f"""UPDATE auth.users
                                 SET password = '{new_hashed_password}'
                                 WHERE id = {decoded_object['id']}""")
                     conn.commit()
@@ -273,7 +283,93 @@ def change_password():
         #print(traceback.format_exc())
         conn.close()
         return {"isSuccess": False, "message": "Bad Request"}, 400
-        
 
-if __name__ == '__main__':
-    app.run(debug = True, host=os.getenv("FLASK_HOST_URL"), port = 5000)
+@app.route("/forgot_password", methods = ["POST"])
+def forgot_password():
+    conn = psycopg2.connect(dbname=dbname, user=dbuser, password=dbpassword, host=dbhost, port=dbport)
+    cur = conn.cursor()
+
+    request_body = request.get_json()
+    try:
+        email = request_body["email"].strip()
+        if email:
+            #Check exist email in the database
+            try:
+                cur.execute(f"SELECT id FROM auth.users WHERE email = '{email}'")
+                result = cur.fetchone()
+                if result is not None:
+                    id = result[0]
+                else:
+                    id = None
+                conn.commit()
+            except Exception:
+                #print(traceback.format_exc())
+                conn.rollback()
+                raise Exception("Error in database")
+            #Generate reset token
+            payload = {
+                "id": id,
+                "email": email,
+                "exp": datetime.now(timezone.utc) + timedelta(minutes=5)
+            }
+            token = jwt.encode(payload, os.getenv("JWT_SECRET_KEY"), algorithm="HS512")
+            #Prepare send_email parameters and send email
+            reset_url = url_for('reset_password', token=token, _external=True)
+            text_body = render_template("reset_email.txt", reset_url=reset_url)
+            html_body = render_template("reset_email.html", reset_url=reset_url)
+            email_subject = "Tournament Management Mobile Application - Password Reset"
+            send_email(email_subject, os.getenv("MAIL_USERNAME"), [email], text_body, html_body)
+            return {"isSuccess": True, "message": "A password reset request has been sent to your email"}, 200
+        else:
+            raise Exception
+    except Exception:
+        print(traceback.format_exc())
+        conn.close()
+        return {"isSuccess": False, "message": "Bad Request"}, 400
+
+@app.route("/reset_password/<token>", methods = ["GET", "POST"])
+def reset_password(token):
+    if request.method == "GET":
+        return render_template("reset_password.html")
+    elif request.method == "POST":
+        try:
+            conn = psycopg2.connect(dbname=dbname, user=dbuser, password=dbpassword, host=dbhost, port=dbport)
+            cur = conn.cursor()
+
+            decoded_object = jwt.decode(token, os.getenv("JWT_SECRET_KEY"), algorithms=["HS512"])
+            try:
+                cur.execute(f"SELECT id, email FROM auth.users WHERE id = {decoded_object['id']} AND email = '{decoded_object['email']}'")
+                result = cur.fetchone()
+                if result is not None:
+                    id, email = result[0], result[1]
+                else:
+                    id = email = None
+                conn.commit()
+            except Exception:
+                #print(traceback.format_exc())
+                conn.rollback()
+                raise Exception("Error in database")
+            if id is not None and email is not None:
+                new_password = request.form.get("new_password")
+                ph = PasswordHasher()
+                new_hashed_password = ph.hash(new_password)
+                try:
+                    cur.execute(f"""UPDATE auth.users
+                                SET password = '{new_hashed_password}'
+                                WHERE id = {id}""")
+                    conn.commit()
+                except Exception:
+                    #print(traceback.format_exc())
+                    conn.rollback()
+                    raise Exception("Error in database")
+                conn.close()
+                return render_template("reset_password_success.html")
+            else:
+                raise Exception
+        except jwt.exceptions.ExpiredSignatureError:
+            #print(traceback.format_exc())
+            conn.close()
+            return {"isSuccess": False, "message": "JWT signature expired"}, 400
+        except Exception:
+            conn.close()
+            return {"isSuccess": False, "message": "Bad Request"}, 400

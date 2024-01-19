@@ -1,0 +1,8 @@
+Hello,
+
+Use the link below to reset your password:
+{{ reset_url }}
+The links will be expired in 5 minutes after your request.
+
+Best regards,
+Nhat Truong
