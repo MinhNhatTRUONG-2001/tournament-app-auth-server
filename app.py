@@ -120,7 +120,7 @@ def sign_in():
                     conn.rollback()
                     raise Exception("Error in database")
                 conn.close()
-                return {"isSuccess": True, "message": "Signed in successfully", "token": token}, 200
+                return {"isSuccess": True, "message": "Signed in successfully", "token": token}
             except exceptions.VerifyMismatchError:
                 raise ValueError
         else:
@@ -153,6 +153,7 @@ def get_user_information():
             conn.rollback()
             raise Exception("Error in database")
         time_after_last_sign_in_time = datetime.now(timezone.utc) - result[2]
+        next_username_change_time = (result[2] + timedelta(days=30, seconds=60)).strftime("%H:%M %d %B, %Y")
         if time_after_last_sign_in_time >= timedelta(days=30):
             can_change_username = True
         else:
@@ -163,14 +164,15 @@ def get_user_information():
             "id": decoded_object['id'],
             "username": result[0],
             "email": result[1],
-            "can_change_username": can_change_username
+            "can_change_username": can_change_username,
+            "next_username_change_time": next_username_change_time
         }
     except jwt.exceptions.ExpiredSignatureError:
         #print(traceback.format_exc())
         conn.close()
         return {"isSuccess": False, "message": "JWT signature expired"}, 400
     except Exception:
-        #print(traceback.format_exc())
+        print(traceback.format_exc())
         conn.close()
         return {"isSuccess": False, "message": "Bad Request"}, 400
     
@@ -219,7 +221,7 @@ def change_user_information():
         conn.close()
         return {"isSuccess": False, "message": "JWT signature expired"}, 400
     except Exception:
-        print(traceback.format_exc())
+        #print(traceback.format_exc())
         conn.close()
         return {"isSuccess": False, "message": "Bad Request"}, 400
     
@@ -319,11 +321,11 @@ def forgot_password():
             html_body = render_template("reset_email.html", reset_url=reset_url)
             email_subject = "Tournament Management Mobile Application - Password Reset"
             send_email(email_subject, os.getenv("MAIL_USERNAME"), [email], text_body, html_body)
-            return {"isSuccess": True, "message": "A password reset request has been sent to your email"}, 200
+            return {"isSuccess": True, "message": "A password reset request has been sent to your email"}
         else:
             raise Exception
     except Exception:
-        print(traceback.format_exc())
+        #print(traceback.format_exc())
         conn.close()
         return {"isSuccess": False, "message": "Bad Request"}, 400
 
