@@ -145,7 +145,7 @@ def get_user_information():
         token = headers["Authorization"].split("Bearer ", 1)[1]
         decoded_object = jwt.decode(token, os.getenv("JWT_SECRET_KEY"), algorithms=["HS512"])
         try:
-            cur.execute(f"SELECT username, email, last_username_change_time FROM auth.users WHERE id = {decoded_object['id']}")
+            cur.execute(f"SELECT username, email, last_username_change_time, country, phone FROM auth.users WHERE id = {decoded_object['id']}")
             result = cur.fetchone()
             conn.commit()
         except Exception:
@@ -165,7 +165,9 @@ def get_user_information():
             "username": result[0],
             "email": result[1],
             "can_change_username": can_change_username,
-            "next_username_change_time": next_username_change_time
+            "next_username_change_time": next_username_change_time,
+            "country": result[3],
+            "phone": result[4]
         }
     except jwt.exceptions.ExpiredSignatureError:
         #print(traceback.format_exc())
@@ -187,9 +189,16 @@ def change_user_information():
         #Decode the token to get user id
         token = headers["Authorization"].split("Bearer ", 1)[1]
         decoded_object = jwt.decode(token, os.getenv("JWT_SECRET_KEY"), algorithms=["HS512"])
-        #Check if fields are null or empty
+        #Check if fields are null or empty, and validate country name and phone number
         new_username = request_body["username"].strip()
-        if new_username:
+        country = request_body["country"].strip()
+        phone = request_body["phone"].strip()
+        if new_username and validate_country(country) and validate_phone(phone):
+            #Finally check if new username is unique
+            isUnique, message = validate_unique_username(conn, cur, decoded_object['id'], new_username)
+            if not isUnique:
+                conn.close()
+                return {"isSuccess": False, "message": message}, 400
             try:
                 cur.execute(f"SELECT last_username_change_time FROM auth.users WHERE id = {decoded_object['id']}")
                 result = cur.fetchone()
@@ -212,6 +221,16 @@ def change_user_information():
                     raise Exception("Error in database")
             else:
                 print("Username cannot be changed within 30 days since last change. Other user information updated successfully")
+            #Change other information
+            try:
+                cur.execute(f"""UPDATE auth.users
+                            SET country = '{country}', phone = '{phone}'
+                            WHERE id = {decoded_object['id']}""")
+                conn.commit()
+            except Exception:
+                #print(traceback.format_exc())
+                conn.rollback()
+                raise Exception("Error in database")
             conn.close()
             return {"isSuccess": True, "message": "User information updated successfully"}
         else:
@@ -221,7 +240,7 @@ def change_user_information():
         conn.close()
         return {"isSuccess": False, "message": "JWT signature expired"}, 400
     except Exception:
-        #print(traceback.format_exc())
+        print(traceback.format_exc())
         conn.close()
         return {"isSuccess": False, "message": "Bad Request"}, 400
     
