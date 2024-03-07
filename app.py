@@ -1,6 +1,7 @@
 from datetime import datetime, timezone, timedelta
 import os
 import psycopg2
+import pytz
 from db_connection import dbname, dbuser, dbpassword, dbhost, dbport
 from flask import Flask, render_template, request, url_for
 from flask_cors import CORS
@@ -153,7 +154,7 @@ def get_user_information():
             conn.rollback()
             raise Exception("Error in database")
         time_after_last_sign_in_time = datetime.now(timezone.utc) - result[2]
-        next_username_change_time = (result[2] + timedelta(days=30, seconds=60)).strftime("%H:%M %d %B, %Y")
+        next_username_change_time = (result[2] + timedelta(days=30, seconds=60)).astimezone(pytz.utc)
         if time_after_last_sign_in_time >= timedelta(days=30):
             can_change_username = True
         else:
