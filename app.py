@@ -175,7 +175,7 @@ def get_user_information():
         conn.close()
         return {"isSuccess": False, "message": "JWT signature expired"}, 400
     except Exception:
-        print(traceback.format_exc())
+        #print(traceback.format_exc())
         conn.close()
         return {"isSuccess": False, "message": "Bad Request"}, 400
     
@@ -241,7 +241,7 @@ def change_user_information():
         conn.close()
         return {"isSuccess": False, "message": "JWT signature expired"}, 400
     except Exception:
-        print(traceback.format_exc())
+        #print(traceback.format_exc())
         conn.close()
         return {"isSuccess": False, "message": "Bad Request"}, 400
     
@@ -395,3 +395,62 @@ def reset_password(token):
         except Exception:
             conn.close()
             return {"isSuccess": False, "message": "Bad Request"}, 400
+
+@app.route("/delete_user_account", methods = ["POST"])
+def delete_user_account():
+    conn = psycopg2.connect(dbname=dbname, user=dbuser, password=dbpassword, host=dbhost, port=dbport)
+    cur = conn.cursor()
+
+    headers = request.headers
+    request_body = request.get_json()
+    try:
+        #Decode the token to get user id
+        token = headers["Authorization"].split("Bearer ", 1)[1]
+        decoded_object = jwt.decode(token, os.getenv("JWT_SECRET_KEY"), algorithms=["HS512"])
+        #Verify user password
+        try:
+            cur.execute(f"""SELECT password FROM auth.users
+                WHERE id = {decoded_object['id']}""")
+            result = cur.fetchone()
+            conn.commit()
+        except Exception:
+            #print(traceback.format_exc())
+            conn.rollback()
+            raise Exception("Error in database")
+        try:
+            ph = PasswordHasher()
+            ph.verify(result[0], request_body["password"])
+        except exceptions.VerifyMismatchError:
+            conn.close()
+            return {"isSuccess": False, "message": "Incorrect password"}, 400
+        #Delete every tournament linked to the deleted user account
+        try:
+            cur.execute(f"SELECT id FROM data.tournaments WHERE user_id = {decoded_object['id']}")
+            result = cur.fetchall()
+            if result:
+                for tid in result:
+                    requests.delete(f"{os.getenv('TOURNAMENT_DATA_SERVER_URL')}/tournaments/{tid}", headers={'Authorization': headers["Authorization"]})
+            conn.commit()
+        except Exception:
+            #print(traceback.format_exc())
+            conn.rollback()
+            raise Exception("Error in database")
+        #Delete user account itself
+        try:
+            cur.execute(f"""DELETE FROM auth.users
+                        WHERE id = {decoded_object['id']}""")
+            conn.commit()
+        except Exception:
+            #print(traceback.format_exc())
+            conn.rollback()
+            raise Exception("Error in database")
+        conn.close()
+        return {"isSuccess": True, "message": "Account deleted successfully"}
+    except jwt.exceptions.ExpiredSignatureError:
+        #print(traceback.format_exc())
+        conn.close()
+        return {"isSuccess": False, "message": "JWT signature expired"}, 400
+    except Exception:
+        #print(traceback.format_exc())
+        conn.close()
+        return {"isSuccess": False, "message": "Bad Request"}, 400
