@@ -62,7 +62,7 @@ def sign_up():
                 payload = {
                     "id": new_id,
                     "email": email,
-                    "exp": datetime.now(timezone.utc) + timedelta(hours=12)
+                    "exp": datetime.now(timezone.utc) + timedelta(days=1)
                 }
                 token = jwt.encode(payload, os.getenv("JWT_SECRET_KEY"), algorithm="HS512")
                 conn.close()
@@ -108,7 +108,7 @@ def sign_in():
                 payload = {
                     "id": result[0],
                     "email": result[1],
-                    "exp": datetime.now(timezone.utc) + timedelta(hours=12)
+                    "exp": datetime.now(timezone.utc) + timedelta(days=1)
                 }
                 token = jwt.encode(payload, os.getenv("JWT_SECRET_KEY"), algorithm="HS512")
                 try:
@@ -132,6 +132,27 @@ def sign_in():
         return {"isSuccess": False, "message": "Username or email or password is not correct"}, 400
     except Exception:
         #print(traceback.format_exc())
+        conn.close()
+        return {"isSuccess": False, "message": "Bad Request"}, 400
+    
+@app.route("/username/<user_id>")
+def get_username_by_id(user_id):
+    conn = psycopg2.connect(dbname=dbname, user=dbuser, password=dbpassword, host=dbhost, port=dbport)
+    cur = conn.cursor()
+
+    try:
+        try:
+            cur.execute(f"SELECT username FROM auth.users WHERE id = {user_id}")
+            result = cur.fetchone()
+            conn.commit()
+        except Exception:
+            print(traceback.format_exc())
+            conn.rollback()
+            raise Exception("Error in database")
+        conn.close()
+        return {"isSuccess": True, "username": result[0]}
+    except Exception:
+        print(traceback.format_exc())
         conn.close()
         return {"isSuccess": False, "message": "Bad Request"}, 400
 
@@ -173,7 +194,7 @@ def get_user_information():
     except jwt.exceptions.ExpiredSignatureError:
         #print(traceback.format_exc())
         conn.close()
-        return {"isSuccess": False, "message": "JWT signature expired"}, 400
+        return {"isSuccess": False, "message": "Token expired"}, 400
     except Exception:
         #print(traceback.format_exc())
         conn.close()
@@ -239,7 +260,7 @@ def change_user_information():
     except jwt.exceptions.ExpiredSignatureError:
         #print(traceback.format_exc())
         conn.close()
-        return {"isSuccess": False, "message": "JWT signature expired"}, 400
+        return {"isSuccess": False, "message": "Token expired"}, 400
     except Exception:
         #print(traceback.format_exc())
         conn.close()
@@ -300,7 +321,7 @@ def change_password():
     except jwt.exceptions.ExpiredSignatureError:
         #print(traceback.format_exc())
         conn.close()
-        return {"isSuccess": False, "message": "JWT signature expired"}, 400
+        return {"isSuccess": False, "message": "Token expired"}, 400
     except Exception:
         #print(traceback.format_exc())
         conn.close()
@@ -391,7 +412,7 @@ def reset_password(token):
         except jwt.exceptions.ExpiredSignatureError:
             #print(traceback.format_exc())
             conn.close()
-            return {"isSuccess": False, "message": "JWT signature expired"}, 400
+            return {"isSuccess": False, "message": "Token expired"}, 400
         except Exception:
             conn.close()
             return {"isSuccess": False, "message": "Bad Request"}, 400
@@ -429,7 +450,7 @@ def delete_user_account():
             result = cur.fetchall()
             if result:
                 for tid in result:
-                    requests.delete(f"{os.getenv('TOURNAMENT_DATA_SERVER_URL')}/tournaments/{tid}", headers={'Authorization': headers["Authorization"]})
+                    requests.delete(f"{os.getenv('TOURNAMENT_DATA_SERVER_URL')}/tournaments/{tid[0]}", headers={'Authorization': headers["Authorization"]})
             conn.commit()
         except Exception:
             #print(traceback.format_exc())
@@ -449,7 +470,7 @@ def delete_user_account():
     except jwt.exceptions.ExpiredSignatureError:
         #print(traceback.format_exc())
         conn.close()
-        return {"isSuccess": False, "message": "JWT signature expired"}, 400
+        return {"isSuccess": False, "message": "Token expired"}, 400
     except Exception:
         #print(traceback.format_exc())
         conn.close()
