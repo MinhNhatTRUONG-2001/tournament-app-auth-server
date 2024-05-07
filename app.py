@@ -343,7 +343,7 @@ def forgot_password():
                 if result is not None:
                     id = result[0]
                 else:
-                    id = None
+                    raise Exception("No email is found in the database")
                 conn.commit()
             except Exception:
                 #print(traceback.format_exc())
